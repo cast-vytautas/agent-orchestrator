@@ -13,9 +13,10 @@ import (
 // Registration is the whole capability gate — a harness with no driver here cannot
 // run chat mode — so the shipped set is a release decision, not an implementation
 // detail. Codex uses its native app-server; Claude, Cursor, OpenCode, Droid,
-// Kimi, Kimchi, Pi, OMP, Qwen, and Agy (through Google's Antigravity ACP server)
+// Kimi, Pi, OMP, Qwen, and Agy (through Google's Antigravity ACP server)
 // use the reusable ACP transport; Unreal Agent is
-// embedded behind the persistent host. Every remaining
+// embedded behind the persistent host. Kimchi is deliberately CLI-only: all
+// interactions go through the terminal adapter. Every remaining
 // harness is deliberately TUI-only.
 func TestShippedChatDrivers(t *testing.T) {
 	r := Build(nil, nil)
@@ -27,7 +28,6 @@ func TestShippedChatDrivers(t *testing.T) {
 		domain.HarnessOpenCodeV2,
 		domain.HarnessDroid,
 		domain.HarnessKimi,
-		domain.HarnessKimchi,
 		domain.HarnessPi,
 		domain.HarnessCursor,
 		domain.HarnessOMP,
@@ -44,9 +44,11 @@ func TestShippedChatDrivers(t *testing.T) {
 		}
 	}
 
-	// Every other harness stays TUI-only, and asking for chat must be refused with a
-	// typed answer rather than quietly producing a terminal session.
+	// Kimchi and every other unregistered harness stay CLI/TUI-only, and asking
+	// for chat must be refused with a typed answer rather than quietly producing
+	// a terminal session.
 	for _, harness := range []domain.AgentHarness{
+		domain.HarnessKimchi,
 		domain.HarnessAider,
 		domain.HarnessHermes, // TUI-only until a chat driver is qualified
 		"definitely-not-an-agent",

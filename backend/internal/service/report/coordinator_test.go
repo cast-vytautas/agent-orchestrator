@@ -69,6 +69,55 @@ func TestCoordinatorRoutesAtAttemptAndLeavesPendingWithoutOrchestrator(t *testin
 	}
 }
 
+// TestCoordinatorPendingWithoutOrchestratorDoesNotBlockOtherProjects locks
+// down the head-of-line starvation seen in production: pending reports for a
+// project whose orchestrator exited kept the coordinator retrying that project
+// forever, so newer pending reports from a project with a live orchestrator
+// were never attempted (delivery_attempts stayed 0 for days).
+func TestCoordinatorPendingWithoutOrchestratorDoesNotBlockOtherProjects(t *testing.T) {
+	now := time.Date(2026, 9, 14, 14, 0, 0, 0, time.UTC)
+	store := newCoordinatorStore(now)
+	orphan := reportAt("orphan", "worker", now, now, "orchestrator exited")
+	orphan.ProjectID = "dead"
+	live := reportAt("live", "worker", now.Add(time.Second), now.Add(10*time.Second), "checkpoint reached")
+	live.ProjectID = "live"
+	store.add(orphan, live)
+	store.sessions = []domain.SessionRecord{{ID: "orch", ProjectID: "live", Kind: domain.KindOrchestrator, Mode: domain.SessionModeChat, CreatedAt: now}}
+	delivery := &coordinatorDelivery{}
+	c := NewCoordinator(CoordinatorDeps{Store: store, Delivery: delivery, Now: func() time.Time { return now }, RetryDelay: time.Second})
+
+	// The orphan's project is the schedule head and has no orchestrator: it
+	// stays pending, and nothing else is due yet.
+	if delay, err := c.RunDue(context.Background()); err == nil || delay != time.Second {
+		t.Fatalf("blocked head delay = %v, err = %v", delay, err)
+	}
+	if len(delivery.submissions) != 0 {
+		t.Fatalf("submissions = %#v, want none before the live report is due", delivery.submissions)
+	}
+
+	// Once the live report is due, its project must be served even though the
+	// blocked head stays at the front of the queue.
+	clock := now.Add(10 * time.Second)
+	c = NewCoordinator(CoordinatorDeps{Store: store, Delivery: delivery, Now: func() time.Time { return clock }, RetryDelay: time.Second})
+	if _, err := c.RunDue(context.Background()); err == nil {
+		t.Fatal("RunDue must keep reporting the orchestrator-less project as blocked")
+	}
+	if len(delivery.submissions) != 1 || delivery.submissions[0].target != "orch" || !strings.Contains(delivery.submissions[0].message, "checkpoint reached") {
+		t.Fatalf("submissions = %#v, want the live project delivered despite the blocked head of the queue", delivery.submissions)
+	}
+	if store.reports[0].DeliveryState != domain.ReportPending {
+		t.Fatalf("orphan state = %s, want pending", store.reports[0].DeliveryState)
+	}
+
+	store.sessions = append(store.sessions, domain.SessionRecord{ID: "dead-orch", ProjectID: "dead", Kind: domain.KindOrchestrator, Mode: domain.SessionModeChat, CreatedAt: clock})
+	if _, err := c.RunDue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(delivery.submissions) != 2 || delivery.submissions[1].target != "dead-orch" {
+		t.Fatalf("submissions = %#v, want the orphan delivered once its orchestrator exists", delivery.submissions)
+	}
+}
+
 func TestCoordinatorStuckInterruptRateLimitAndCoalescing(t *testing.T) {
 	now := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	store := newCoordinatorStore(now)
@@ -210,13 +259,13 @@ func (s *coordinatorStore) add(records ...domain.ReportRecord) {
 	s.reports = append(s.reports, records...)
 }
 func (s *coordinatorStore) ListSessions(_ context.Context, project domain.ProjectID) ([]domain.SessionRecord, error) {
-	var recs []domain.SessionRecord
+	var inProject []domain.SessionRecord
 	for _, rec := range s.sessions {
 		if rec.ProjectID == project {
-			recs = append(recs, rec)
+			inProject = append(inProject, rec)
 		}
 	}
-	return recs, nil
+	return inProject, nil
 }
 func (s *coordinatorStore) GetSession(_ context.Context, id domain.SessionID) (domain.SessionRecord, bool, error) {
 	for _, rec := range s.sessions {
@@ -226,7 +275,7 @@ func (s *coordinatorStore) GetSession(_ context.Context, id domain.SessionID) (d
 	}
 	return domain.SessionRecord{}, false, nil
 }
-func (s *coordinatorStore) ListPendingReportSchedule(context.Context, int64) ([]domain.ReportRecord, error) {
+func (s *coordinatorStore) ListPendingReportSchedule(_ context.Context, limit int64) ([]domain.ReportRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var pending []domain.ReportRecord
@@ -236,8 +285,8 @@ func (s *coordinatorStore) ListPendingReportSchedule(context.Context, int64) ([]
 		}
 	}
 	sortReports(pending)
-	if len(pending) > 1 {
-		pending = pending[:1]
+	if int64(len(pending)) > limit {
+		pending = pending[:limit]
 	}
 	return pending, nil
 }

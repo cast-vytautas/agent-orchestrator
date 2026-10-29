@@ -196,6 +196,53 @@ func TestCoordinatorBusyOrchestratorDoesNotHoldUpOtherProjects(t *testing.T) {
 	}
 }
 
+func TestCoordinatorUnsupportedOrchestratorDoesNotBlockOtherProjects(t *testing.T) {
+	// Project p's orchestrator cannot accept semantic batches at all — the typed
+	// refusal every kimchi-TUI orchestrator returned before its adapter exposed
+	// acceptance. Release would keep p the instantly-due schedule head and poison
+	// every cycle; production saw one project retried thousands of times while
+	// later projects never reached a single attempt. p must back off instead, and
+	// project q must still deliver.
+	now := time.Date(2026, 9, 14, 15, 0, 0, 0, time.UTC)
+	store := newCoordinatorStore(now)
+	store.sessions = []domain.SessionRecord{
+		{ID: "orch-p", ProjectID: "p", Kind: domain.KindOrchestrator, Mode: domain.SessionModeTUI},
+		{ID: "orch-q", ProjectID: "q", Kind: domain.KindOrchestrator, Mode: domain.SessionModeTUI},
+	}
+	other := reportAt("q-1", "worker-q", now.Add(time.Second), now, "q finished")
+	other.ProjectID = "q"
+	store.add(reportAt("p-1", "worker-p", now, now, "p finished"), other)
+	delivery := &coordinatorDelivery{submitErrFor: map[domain.SessionID]error{
+		"orch-p": fmt.Errorf("send orch-p: %w", ErrReportDeliveryModeUnsupported),
+	}}
+	c := NewCoordinator(CoordinatorDeps{Store: store, Delivery: delivery, Now: func() time.Time { return now }, NewToken: func() string { return "claim" }})
+
+	delay, err := c.RunDue(context.Background())
+	if err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+	if len(delivery.submissions) != 1 || delivery.submissions[0].target != "orch-q" {
+		t.Fatalf("submissions = %#v, want q's report delivered past p's unsupported orchestrator", delivery.submissions)
+	}
+	if delay != OrchestratorBusyRetry {
+		t.Fatalf("next run in %v, want p's backoff %v", delay, OrchestratorBusyRetry)
+	}
+	for _, rec := range store.reports {
+		if rec.ID == "p-1" && (rec.DeliveryState != domain.ReportPending || !rec.AvailableAt.Equal(now.Add(OrchestratorBusyRetry))) {
+			t.Fatalf("p's report = %s available %s, want pending at %s", rec.DeliveryState, rec.AvailableAt, now.Add(OrchestratorBusyRetry))
+		}
+	}
+
+	now = now.Add(OrchestratorBusyRetry)
+	delete(delivery.submitErrFor, "orch-p")
+	if _, err := c.RunDue(context.Background()); err != nil {
+		t.Fatalf("RunDue after backoff: %v", err)
+	}
+	if len(delivery.submissions) != 2 || delivery.submissions[1].target != "orch-p" {
+		t.Fatalf("submissions = %#v, want p's report delivered once its orchestrator accepts semantics", delivery.submissions)
+	}
+}
+
 func TestReportSessionLinkUsesDisplayName(t *testing.T) {
 	got := reportSessionLink(domain.ReportRecord{
 		SessionID: "worker/1", ProjectID: "proj 1", SessionDisplayName: "Backend [worker]",

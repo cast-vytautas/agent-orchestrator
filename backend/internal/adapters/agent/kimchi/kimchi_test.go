@@ -811,6 +811,14 @@ func TestEmitsSubmitActivity(t *testing.T) {
 	}
 }
 
+func TestEmitsSemanticMessageAcceptance(t *testing.T) {
+	p := &Plugin{}
+	if !p.EmitsSemanticMessageAcceptance() {
+		t.Fatal("EmitsSemanticMessageAcceptance() = false, want true")
+	}
+	var _ ports.SemanticMessageAcceptanceSignaler = p
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)
 }

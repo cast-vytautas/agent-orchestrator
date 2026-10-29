@@ -37,6 +37,12 @@ var ErrOrchestratorBusy = errors.New("orchestrator cannot take reports right now
 // blocked project cannot abort delivery of the projects behind it.
 var errNoActiveOrchestrator = errors.New("no active orchestrator")
 
+// errDeliveryDeferred marks a project whose active orchestrator structurally
+// could not take the batch, so the batch was pushed back with a retry delay.
+// It is matched with errors.Is so one unsupported orchestrator cannot abort
+// delivery of the projects behind it.
+var errDeliveryDeferred = errors.New("delivery deferred with backoff")
+
 // pendingScanLimit bounds how many pending schedule rows one cycle inspects
 // when collecting due projects. A project stuck without an orchestrator stays
 // pending without blocking newer projects, so the scan must reach past its
@@ -171,6 +177,7 @@ func (c *Coordinator) RunDue(ctx context.Context) (time.Duration, error) {
 // must be skipped rather than allowed to starve every project behind it.
 func (c *Coordinator) deliverDueProjects(ctx context.Context, pending []domain.ReportRecord, now time.Time) error {
 	var blocked []domain.ProjectID
+	var deferred []domain.ProjectID
 	for _, projectID := range dueProjects(pending, now) {
 		err := c.deliverProject(ctx, projectID)
 		if err == nil {
@@ -180,12 +187,19 @@ func (c *Coordinator) deliverDueProjects(ctx context.Context, pending []domain.R
 			blocked = append(blocked, projectID)
 			continue
 		}
+		if errors.Is(err, errDeliveryDeferred) {
+			deferred = append(deferred, projectID)
+			continue
+		}
 		return err
 	}
-	if len(blocked) == 0 {
-		return errors.New("due reports delivered no batch")
+	if len(blocked) > 0 {
+		return fmt.Errorf("projects %s: %w", joinProjectIDs(blocked), errNoActiveOrchestrator)
 	}
-	return fmt.Errorf("projects %s: %w", joinProjectIDs(blocked), errNoActiveOrchestrator)
+	if len(deferred) > 0 {
+		return fmt.Errorf("projects %s: %w", joinProjectIDs(deferred), errDeliveryDeferred)
+	}
+	return errors.New("due reports delivered no batch")
 }
 
 // dueProjects returns the distinct projects of due pending reports in schedule
@@ -251,6 +265,21 @@ func (c *Coordinator) deliverProject(ctx context.Context, projectID domain.Proje
 			// stop RunDue before any other project's reports. Back off instead.
 			_, deferErr := c.store.DeferReportBatch(ctx, batch.ProjectID, batch.Token, c.now().UTC().Add(OrchestratorBusyRetry), err.Error())
 			return deferErr
+		}
+		if errors.Is(err, ErrReportDeliveryModeUnsupported) {
+			// The active orchestrator structurally cannot accept semantic batches —
+			// for example a TUI harness whose adapter exposes no acceptance signal
+			// (the daemon maps session_manager's typed refusal onto this class).
+			// Release would leave the batch the instantly-due schedule head and
+			// poison every cycle: production saw one project retried thousands of
+			// times while later projects never reached a single attempt. Deferring
+			// with backoff bounds the churn, keeps the reports pending, and lets
+			// deliverDueProjects skip this project so later projects still deliver.
+			_, deferErr := c.store.DeferReportBatch(ctx, batch.ProjectID, batch.Token, c.now().UTC().Add(OrchestratorBusyRetry), err.Error())
+			if deferErr != nil {
+				return deferErr
+			}
+			return fmt.Errorf("%w: %w", errDeliveryDeferred, err)
 		}
 		return c.release(ctx, batch, err)
 	}

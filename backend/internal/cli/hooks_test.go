@@ -1076,6 +1076,7 @@ func TestHookSemanticAcceptanceFacts(t *testing.T) {
 		domain.HarnessPi,
 		domain.HarnessAmp,
 		domain.HarnessPrimeAgent,
+		domain.HarnessKimchi,
 	} {
 		t.Run(string(harness), func(t *testing.T) {
 			got := hookSemanticAcceptanceFacts(
@@ -1095,6 +1096,39 @@ func TestHookSemanticAcceptanceFacts(t *testing.T) {
 	ordinary := hookSemanticAcceptanceFacts("user-prompt-submit", []byte(`{"prompt":"private prompt"}`))
 	if ordinary != (hookConversationSnapshot{}) {
 		t.Fatalf("ordinary prompt became a semantic checkpoint: %#v", ordinary)
+	}
+}
+
+// TestHooks_KimchiPromptSubmitCorrelatesReportBatch locks the delivery path the
+// report coordinator depends on for kimchi orchestrators: the accepted prompt's
+// wrapped report identity must reach the activity request as a coordination
+// checkpoint, and the envelope text must never surface as a human prompt.
+func TestHooks_KimchiPromptSubmitCorrelatesReportBatch(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "ao-9")
+	cfg := setConfigEnv(t)
+	srv, capture := activityServer(t, http.StatusOK, `{"ok":true}`)
+	writeRunFileFor(t, cfg, srv)
+
+	wrapped := domain.WrapReportDelivery("report-batch:abc123", "worker finished")
+	_, errOut, err := executeCLI(t, Deps{
+		In:           strings.NewReader(`{"prompt":` + mustJSONString(t, wrapped) + `}`),
+		ProcessAlive: func(int) bool { return true },
+	}, "hooks", "kimchi", "user-prompt-submit")
+	if err != nil {
+		t.Fatalf("unexpected error: %v\nstderr=%s", err, errOut)
+	}
+	var req setActivityAPIRequest
+	if err := json.Unmarshal([]byte(capture.body), &req); err != nil {
+		t.Fatalf("decode activity request: %v", err)
+	}
+	if req.ConversationCheckpointOrigin != domain.ConversationCheckpointOriginCoordination || req.CoordinationID != "report-batch:abc123" {
+		t.Fatalf("coordination facts = %s/%q, want coordination/report-batch:abc123", req.ConversationCheckpointOrigin, req.CoordinationID)
+	}
+	if req.State != string(domain.ActivityActive) {
+		t.Fatalf("state = %q, want active", req.State)
+	}
+	if req.LatestUserPrompt != "" {
+		t.Fatalf("report envelope leaked into the user prompt: %q", req.LatestUserPrompt)
 	}
 }
 

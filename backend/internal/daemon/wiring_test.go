@@ -1015,6 +1015,8 @@ func (f *fakeSessionLifecycle) RestoreAll(_ context.Context) error {
 	return f.restoreErr
 }
 
+func (*fakeSessionLifecycle) ResumeStartupSettledSessions(context.Context) error { return nil }
+
 func (*fakeSessionLifecycle) WaitAgentSwitchWorkers(context.Context) error { return nil }
 func (*fakeSessionLifecycle) WaitBackgroundWorkers(context.Context) error  { return nil }
 func (*fakeSessionLifecycle) StopAgentsForQuit(context.Context) error      { return nil }

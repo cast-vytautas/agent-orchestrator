@@ -448,6 +448,12 @@ type Manager struct {
 	// Only pre-listener provisioning writes that failed may be retried after
 	// bind; scanning then would also sweep tasks created by this daemon.
 	startupProvisioningRetries []domain.SessionRecord
+	// Terminal sessions the startup health check proved dead while AO was down
+	// and settled to stopped-and-resumable this boot; the boot resume sweep
+	// drains them to relaunch crash victims in place. Deliberate exits predate
+	// the boot and never enter the list.
+	startupSettledDeadMu sync.Mutex
+	startupSettledDead   []domain.SessionID
 	// runBackground runs an asynchronous spawn's remaining work. Nil means a
 	// plain goroutine; tests substitute a synchronous runner.
 	runBackground     func(func())
@@ -3395,7 +3401,17 @@ func (m *Manager) resumeAgentWithMode(ctx context.Context, id domain.SessionID, 
 		}
 	}()
 	if rec.IsTerminated {
-		return RestoreResult{}, fmt.Errorf("resume agent %s: %w", id, ErrTerminated)
+		// A terminated session recovers through restore, which preserves its
+		// id and natively resumes when the harness supports it. Refusing here
+		// after an environment crash pushed callers toward spawning a
+		// replacement session under the next number instead of relaunching
+		// this one. Release the resume gate and harness lease first:
+		// RestoreWithMode acquires its own.
+		releaseHarness()
+		releaseHarness = nil
+		m.endAgentResume(id)
+		resumeHandedOff = true
+		return m.RestoreWithMode(ctx, id)
 	}
 	if rec.ProvisionState.IsProvisioning() {
 		return RestoreResult{}, fmt.Errorf("resume agent %s: %w", id, ErrResumeInProgress)

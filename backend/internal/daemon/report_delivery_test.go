@@ -72,3 +72,15 @@ func TestReportSemanticDeliveryMarksAComposerDraftAsBusy(t *testing.T) {
 		t.Fatalf("Submit error = %v, want other failures left as they are", err)
 	}
 }
+
+func TestReportSemanticDeliveryMarksUnsupportedHarnessForDeferral(t *testing.T) {
+	// A TUI orchestrator whose harness cannot confirm semantic acceptance used to
+	// fail every Submit; the coordinator must see the unsupported class so it can
+	// defer the batch and move on to other projects instead of aborting the cycle.
+	sessions := &reportDeliverySession{sendErr: fmt.Errorf("send ao-1: %w", sessionmanager.ErrSemanticAcceptanceUnsupported)}
+	delivery := reportSemanticDelivery{sessions: sessions}
+	err := delivery.Submit(context.Background(), "ao-1", "report context", "report-batch:abc123")
+	if !errors.Is(err, reportsvc.ErrReportDeliveryModeUnsupported) || !errors.Is(err, sessionmanager.ErrSemanticAcceptanceUnsupported) {
+		t.Fatalf("Submit error = %v, want ErrReportDeliveryModeUnsupported wrapping ErrSemanticAcceptanceUnsupported", err)
+	}
+}

@@ -19,7 +19,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/deepseekharness"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/droid"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/hermes"
-	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/kimchi"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/kimi"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/omp"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/agent/opencode"
@@ -36,7 +35,6 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/deepseekharnessacp"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/droidacp"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/hermesacp"
-	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/kimchiacp"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/kimiacp"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/ompacp"
 	"github.com/aoagents/agent-orchestrator/backend/internal/adapters/chatdriver/opencodeacp"
@@ -75,11 +73,16 @@ func New(drivers ...ports.ChatDriver) *Registry {
 //
 // Codex uses its native app-server protocol. Claude Code uses AO's reusable ACP
 // transport plus claude-agent-acp, pointed at the user's own Claude executable.
-// Cursor, OpenCode, Droid, Kimi, Kimchi, Pi, OMP, Qwen, Command Code,
+// Cursor, OpenCode, Droid, Kimi, Pi, OMP, Qwen, Command Code,
 // DeepSeek Harness, Hermes, and GitHub Copilot expose ACP themselves, so AO launches the exact executable
 // resolved by each existing agent plugin. No path scrapes terminal output or
 // packages a second provider CLI.
 // Unreal Agent is compiled into AO and runs behind the same detached host seam.
+//
+// Kimchi is deliberately CLI-only: every interaction (worker sessions,
+// restores, reviewers) drives the interactive `kimchi` binary through the
+// terminal adapter, and Chat requests are refused with ErrChatUnsupported
+// instead of launching `kimchi --mode acp`.
 //
 // Every other harness stays TUI-only until the same is true of it. The driver
 // reuses the harness's existing agent plugin for binary resolution and auth, so
@@ -105,8 +108,6 @@ func Build(log *slog.Logger, onClaudeAuthRejected func()) *Registry {
 	add(droidacp.New(droidPlugin, log), droidPlugin)
 	kimiPlugin := kimi.New()
 	add(kimiacp.New(kimiPlugin, log), kimiPlugin)
-	kimchiPlugin := kimchi.New()
-	add(kimchiacp.New(kimchiPlugin, log), kimchiPlugin)
 	piPlugin := pi.New()
 	add(piacp.New(piPlugin, log), piPlugin)
 	cursorPlugin := cursor.New()

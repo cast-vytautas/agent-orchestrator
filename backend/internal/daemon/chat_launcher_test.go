@@ -40,3 +40,12 @@ func TestChatLauncherForwardsSessionRelay(t *testing.T) {
 		})
 	}
 }
+
+func TestReviewChatPermissionModeFallsBackToAutoWhenUnset(t *testing.T) {
+	if got := reviewChatPermissionMode(""); got != ports.PermissionModeAuto {
+		t.Fatalf("unset reviewer permissions = %q, want auto", got)
+	}
+	if got := reviewChatPermissionMode(domain.PermissionModeBypassPermissions); got != domain.PermissionModeBypassPermissions {
+		t.Fatalf("explicit reviewer permissions = %q, want bypass-permissions passed through", got)
+	}
+}

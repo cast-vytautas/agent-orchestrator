@@ -642,7 +642,7 @@ func (e *Engine) TriggerWithOptions(ctx stdctx.Context, workerID domain.SessionI
 			return TriggerResult{}, failRuns(0, err)
 		}
 		defer releaseHarness()
-		if err := e.launcher.Preflight(ctx, harness, worker.Metadata.WorkspacePath, selectedMode); err != nil {
+		if err := e.launcher.Preflight(ctx, harness, worker.Metadata.WorkspacePath, config.Permissions, selectedMode); err != nil {
 			return TriggerResult{}, failRuns(0, fmt.Errorf("reviewer preflight: %w", err))
 		}
 		// A review owns one Chat controller. Stop it while its durable fence

@@ -42,7 +42,9 @@ type Launcher interface {
 	// only when a reviewer launch is actually required, after ReviewRun rows
 	// have been created. On failure the engine's Trigger() calls failRuns() to
 	// mark those rows as failed, matching the existing Spawn failure semantics.
-	Preflight(ctx context.Context, harness domain.ReviewerHarness, workspacePath string, mode ...domain.ReviewerInterfaceMode) error
+	// Permissions is the resolved reviewer permission mode the launch will use,
+	// so Chat preflight validates the same mode the start will request.
+	Preflight(ctx context.Context, harness domain.ReviewerHarness, workspacePath string, permissions ports.PermissionMode, mode ...domain.ReviewerInterfaceMode) error
 	// live pane (stable per worker, reused across passes) plus any native agent
 	// session id known at launch time.
 	Spawn(ctx context.Context, spec LaunchSpec) (LaunchResult, error)
@@ -104,13 +106,16 @@ type LaunchResult struct {
 
 // ReviewerChatStart is the transport-neutral typed reviewer launch request.
 type ReviewerChatStart struct {
-	BatchID                string
-	ReviewID               string
-	WorkerID               domain.SessionID
-	ProjectID              domain.ProjectID
-	Harness                domain.AgentHarness
-	Model                  string
-	Effort                 string
+	BatchID   string
+	ReviewID  string
+	WorkerID  domain.SessionID
+	ProjectID domain.ProjectID
+	Harness   domain.AgentHarness
+	Model     string
+	Effort    string
+	// Permissions is the resolved reviewer permission mode (project or session
+	// reviewer config). Empty defers to the wiring's reviewer default.
+	Permissions            ports.PermissionMode
 	DataDir                string
 	WorkspacePath          string
 	Env                    map[string]string
@@ -123,7 +128,7 @@ type ReviewerChatStart struct {
 // typed Chat service. It deliberately excludes HTTP and renderer concerns.
 type ReviewerChatController interface {
 	SupportsReviewChat(domain.AgentHarness) bool
-	PreflightReviewChat(context.Context, domain.AgentHarness) error
+	PreflightReviewChat(context.Context, domain.AgentHarness, ports.PermissionMode) error
 	StartReviewChat(context.Context, ReviewerChatStart) (string, error)
 	RestoreReviewChat(context.Context, ReviewerChatStart) (string, error)
 	SendReviewChat(context.Context, string, string, string) error
@@ -224,13 +229,13 @@ func NewLauncher(reviewers ports.ReviewerResolver, rt reviewerRuntime, dataDir s
 // resolve the adapter, build the real ReviewCommand, and validate the
 // executable. The only difference from Spawn is that Preflight stops before
 // runtime.Create().
-func (l *agentLauncher) Preflight(ctx context.Context, harness domain.ReviewerHarness, workspacePath string, mode ...domain.ReviewerInterfaceMode) error {
+func (l *agentLauncher) Preflight(ctx context.Context, harness domain.ReviewerHarness, workspacePath string, permissions ports.PermissionMode, mode ...domain.ReviewerInterfaceMode) error {
 	reviewer, ok := l.reviewers.Reviewer(harness)
 	if !ok {
 		return fmt.Errorf("no reviewer adapter for harness %q", harness)
 	}
 	if profile, ok := reviewer.(ports.ReviewerChatProfile); ok && (len(mode) == 0 || mode[0] != domain.ReviewerInterfaceTUI) && l.reviewChatSupported(profile) {
-		return l.chat.PreflightReviewChat(ctx, profile.ReviewChatHarness())
+		return l.chat.PreflightReviewChat(ctx, profile.ReviewChatHarness(), permissions)
 	}
 	cmd, err := reviewer.ReviewCommand(ctx, ports.ReviewInvocation{WorkspacePath: workspacePath})
 	if err != nil {
@@ -496,7 +501,7 @@ func (l *agentLauncher) startReviewerChat(ctx context.Context, spec LaunchSpec, 
 	if spec.DeferInitialMessage {
 		prompt = ""
 	}
-	start := ReviewerChatStart{BatchID: spec.BatchID, ReviewID: spec.ReviewSessionID, WorkerID: spec.WorkerID, ProjectID: spec.ProjectID, Harness: profile.ReviewChatHarness(), Model: spec.AgentConfig.Model, Effort: spec.AgentConfig.Effort, DataDir: l.dataDir, WorkspacePath: spec.WorkspacePath, Env: l.runtimeEnv(ctx, spec, nil, nil), Prompt: prompt, SystemPrompt: string(systemPrompt), ProviderConversationID: providerID}
+	start := ReviewerChatStart{BatchID: spec.BatchID, ReviewID: spec.ReviewSessionID, WorkerID: spec.WorkerID, ProjectID: spec.ProjectID, Harness: profile.ReviewChatHarness(), Model: spec.AgentConfig.Model, Effort: spec.AgentConfig.Effort, Permissions: spec.AgentConfig.Permissions, DataDir: l.dataDir, WorkspacePath: spec.WorkspacePath, Env: l.runtimeEnv(ctx, spec, nil, nil), Prompt: prompt, SystemPrompt: string(systemPrompt), ProviderConversationID: providerID}
 	if restore {
 		providerID, err = l.chat.RestoreReviewChat(ctx, start)
 	} else {

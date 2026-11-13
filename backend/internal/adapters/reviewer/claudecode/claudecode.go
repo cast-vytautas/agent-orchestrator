@@ -62,6 +62,7 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 	if err != nil {
 		return ports.ReviewCommandSpec{}, err
 	}
+	permissions := reviewerPermissionMode(inv.Config.Permissions)
 	argv, err := r.agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		Config: inv.Config,
 		// Pin the same reviewer-native id we persist. Hooks can later replace
@@ -73,18 +74,40 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 		Prompt:           inv.Prompt,
 		SystemPrompt:     inv.SystemPrompt,
 		SystemPromptFile: inv.SystemPromptFile,
-		// AO's default mode adds no flag; pinDefaultMode then pins Claude's.
-		Permissions:     ports.PermissionModeDefault,
+		// A configured reviewer permission flows through verbatim; an unset
+		// config keeps AO's default mode, which adds no flag, and
+		// pinDefaultMode then pins Claude's so the read-only allow/deny lists
+		// are enforced instead of deferring to the user's own defaultMode,
+		// which may itself be bypass. A configured bypass opts out of that
+		// enforcement, which bypass modes ignore anyway.
+		Permissions:     permissions,
 		AllowedTools:    workeragent.ReviewerAllowedTools,
 		DisallowedTools: workeragent.ReviewerDisallowedTools,
 	})
 	if err != nil {
 		return ports.ReviewCommandSpec{}, err
 	}
-	if argv, err = pinDefaultMode(argv); err != nil {
-		return ports.ReviewCommandSpec{}, err
+	if permissions == ports.PermissionModeDefault {
+		argv, err = pinDefaultMode(argv)
+		if err != nil {
+			return ports.ReviewCommandSpec{}, err
+		}
 	}
 	return ports.ReviewCommandSpec{Argv: argv, AgentSessionID: agentSessionID}, nil
+}
+
+// reviewerPermissionMode resolves the permission mode a Claude reviewer launch
+// runs in. A reviewer permission resolved from project, session, or trigger
+// config flows through verbatim — a configured bypass is an explicit opt-out
+// of the read-only tool enforcement, which bypass modes ignore anyway. An
+// unset config keeps AO's default mode, where the allow/deny tool lists stay
+// effective once pinDefaultMode pins Claude's starting mode instead of
+// deferring to the user's own defaultMode, which may itself be bypass.
+func reviewerPermissionMode(mode ports.PermissionMode) ports.PermissionMode {
+	if mode == "" {
+		return ports.PermissionModeDefault
+	}
+	return mode
 }
 
 // pinDefaultMode starts the reviewer pane in Claude's default ("Manual") mode,
@@ -168,8 +191,9 @@ func (r *Reviewer) PreLaunch(ctx context.Context, inv ports.ReviewInvocation) er
 		Config:        inv.Config,
 		SessionID:     workeragent.SessionUUID(inv.ReviewerID),
 		WorkspacePath: inv.WorkspacePath,
-		// Any explicit mode: the pane pins its mode in flag settings
-		// (pinDefaultMode), so the user's global config must not be marked.
+		// Whatever mode the pane runs in is carried by its own launch flags —
+		// pinDefaultMode pins the default, a configured mode emits its own —
+		// so the user's global config must not be marked.
 		Permissions: ports.PermissionModeAuto,
 	})
 }
@@ -190,16 +214,20 @@ func (r *Reviewer) ReviewRestoreCommand(ctx context.Context, inv ports.ReviewInv
 	} else if migratedID != "" {
 		inv.AgentSessionID = migratedID
 	}
+	permissions := reviewerPermissionMode(inv.Config.Permissions)
 	cmd, ok, err := agentrestore.Command(ctx, r.agent, inv, agentrestore.Options{
-		Permissions:     ports.PermissionModeDefault,
+		Permissions:     permissions,
 		AllowedTools:    workeragent.ReviewerAllowedTools,
 		DisallowedTools: workeragent.ReviewerDisallowedTools,
 	})
 	if err != nil || !ok {
 		return cmd, ok, err
 	}
-	if cmd.Argv, err = pinDefaultMode(cmd.Argv); err != nil {
-		return ports.ReviewCommandSpec{}, false, err
+	if permissions == ports.PermissionModeDefault {
+		cmd.Argv, err = pinDefaultMode(cmd.Argv)
+		if err != nil {
+			return ports.ReviewCommandSpec{}, false, err
+		}
 	}
 	if cmd.AgentSessionID == "" {
 		cmd.AgentSessionID = workeragent.SessionUUID(inv.ReviewerID)

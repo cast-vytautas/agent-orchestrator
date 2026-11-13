@@ -42,6 +42,23 @@ func (a *captureAgent) SessionInfo(context.Context, ports.SessionRef) (ports.Ses
 	return ports.SessionInfo{}, false, nil
 }
 
+func TestReviewCommandHonorsConfiguredPermissions(t *testing.T) {
+	agent := &captureAgent{}
+	r := &Reviewer{agent: agent}
+
+	if _, err := r.ReviewCommand(context.Background(), ports.ReviewInvocation{
+		ReviewerID:    "review-w1",
+		WorkspacePath: "/ws/w1",
+		Prompt:        "review it",
+		Config:        ports.AgentConfig{Permissions: ports.PermissionModeBypassPermissions},
+	}); err != nil {
+		t.Fatalf("ReviewCommand: %v", err)
+	}
+	if agent.got.Permissions != ports.PermissionModeBypassPermissions {
+		t.Fatalf("configured reviewer permissions = %q, want bypass-permissions verbatim", agent.got.Permissions)
+	}
+}
+
 func TestReviewCommandUsesReadOnlyPermissionPolicy(t *testing.T) {
 	agent := &captureAgent{}
 	r := &Reviewer{agent: agent}
@@ -60,7 +77,7 @@ func TestReviewCommandUsesReadOnlyPermissionPolicy(t *testing.T) {
 		t.Fatalf("prompt = %q", agent.got.Prompt)
 	}
 	if agent.got.Permissions != ports.PermissionModeAuto {
-		t.Fatalf("permissions = %q, want auto", agent.got.Permissions)
+		t.Fatalf("reviewer without configured permissions must default to auto; got %q", agent.got.Permissions)
 	}
 	config := map[string]any{}
 	if err := json.Unmarshal([]byte(got.Env["OPENCODE_CONFIG_CONTENT"]), &config); err != nil {

@@ -103,11 +103,14 @@ var _ ports.ReviewerCanceller = (*Reviewer)(nil)
 var _ ports.ReviewerRestorer = (*Reviewer)(nil)
 
 // ReviewCommand builds the argv to launch a fresh Kimchi reviewer over the
-// worker's checkout. --auto keeps the session moving while the allow/deny tool
-// lists provide best-effort hardening for the review tools (git
-// diff/log/status to inspect the PR, gh api to post the review, printf to pipe
-// JSON, and `ao review submit` to record the verdict). The deny list covers
-// common mutation paths, but does not make the process read-only or isolated.
+// worker's checkout. When no reviewer permission is configured, --auto keeps
+// the session moving while the allow/deny tool lists provide best-effort
+// hardening for the review tools (git diff/log/status to inspect the PR, gh
+// api to post the review, printf to pipe JSON, and `ao review submit` to
+// record the verdict). A configured reviewer permission (project, session, or
+// trigger) flows through verbatim; bypass-permissions opts out of the tool
+// lists, which bypass modes ignore entirely. The deny list covers common
+// mutation paths, but does not make the process read-only or isolated.
 func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, error) {
 	argv, err := r.agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		Config:           inv.Config,
@@ -116,7 +119,7 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 		Prompt:           inv.Prompt,
 		SystemPrompt:     inv.SystemPrompt,
 		SystemPromptFile: inv.SystemPromptFile,
-		Permissions:      ports.PermissionModeAuto,
+		Permissions:      ports.ReviewerPermissionMode(inv.Config.Permissions),
 		AllowedTools:     reviewerAllowedTools,
 		DisallowedTools:  reviewerDisallowedTools,
 	})
@@ -138,10 +141,11 @@ func (r *Reviewer) ReviewMessage(_ context.Context, inv ports.ReviewInvocation) 
 }
 
 // ReviewRestoreCommand resumes the captured native Kimchi conversation and
-// reapplies the same best-effort tool policy as a fresh reviewer launch.
+// reapplies the same permission mode and best-effort tool policy as a fresh
+// reviewer launch.
 func (r *Reviewer) ReviewRestoreCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, bool, error) {
 	return agentrestore.Command(ctx, r.agent, inv, agentrestore.Options{
-		Permissions:     ports.PermissionModeAuto,
+		Permissions:     ports.ReviewerPermissionMode(inv.Config.Permissions),
 		AllowedTools:    reviewerAllowedTools,
 		DisallowedTools: reviewerDisallowedTools,
 	})

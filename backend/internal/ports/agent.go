@@ -937,6 +937,20 @@ func NormalizePermissionMode(mode PermissionMode) PermissionMode {
 	}
 }
 
+// ReviewerPermissionMode resolves the permission mode a reviewer launch
+// requests. A reviewer permission resolved from project, session, or trigger
+// config flows through verbatim; empty keeps the reviewer default of auto,
+// where adapters' read-only allow/deny tool rules stay in effect. Note that a
+// configured bypass-permissions makes those tool lists inert — bypass modes
+// skip the permission system entirely — so it is an explicit opt-out of the
+// enforcement, not the default.
+func ReviewerPermissionMode(mode PermissionMode) PermissionMode {
+	if mode == "" {
+		return PermissionModeAuto
+	}
+	return mode
+}
+
 // PromptDeliveryStrategy describes how AO should deliver the initial prompt.
 type PromptDeliveryStrategy string
 

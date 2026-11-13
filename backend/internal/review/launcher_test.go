@@ -1167,7 +1167,7 @@ func TestLauncherPreflightResolvesAdapter(t *testing.T) {
 		},
 	}
 	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, &fakeRuntime{}, "")
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); err != nil {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
 	if !called {
@@ -1189,7 +1189,7 @@ func TestLauncherPreflightUsesAgentAuthCatalogForReviewerAuth(t *testing.T) {
 		WithAgentAuth(fakeAgentAuthResolver{status: ports.AgentAuthStatusAuthorized, ok: true}),
 	)
 
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); err != nil {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
 }
@@ -1203,14 +1203,14 @@ func TestLauncherPreflightAgentAuthUnauthorizedBlocksReviewer(t *testing.T) {
 		WithAgentAuth(fakeAgentAuthResolver{status: ports.AgentAuthStatusUnauthorized, ok: true}),
 	)
 
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); !errors.Is(err, ports.ErrChatAuthRequired) {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); !errors.Is(err, ports.ErrChatAuthRequired) {
 		t.Fatalf("err = %v, want ErrChatAuthRequired", err)
 	}
 }
 
 func TestLauncherPreflightNoAdapter(t *testing.T) {
 	l := NewLauncher(fakeReviewerResolver{ok: false}, &fakeRuntime{}, "")
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); err == nil || !strings.Contains(err.Error(), "no reviewer adapter") {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); err == nil || !strings.Contains(err.Error(), "no reviewer adapter") {
 		t.Fatalf("err = %v, want 'no reviewer adapter'", err)
 	}
 }
@@ -1218,7 +1218,7 @@ func TestLauncherPreflightNoAdapter(t *testing.T) {
 func TestLauncherPreflightReviewCommandError(t *testing.T) {
 	reviewer := &fakeReviewerForPreflight{CommandErr: errors.New("reviewer unavailable")}
 	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, &fakeRuntime{}, "")
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); err == nil || !strings.Contains(err.Error(), "reviewer unavailable") {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); err == nil || !strings.Contains(err.Error(), "reviewer unavailable") {
 		t.Fatalf("err = %v, want containing 'reviewer unavailable'", err)
 	}
 }
@@ -1226,7 +1226,7 @@ func TestLauncherPreflightReviewCommandError(t *testing.T) {
 func TestLauncherPreflightEmptyArgv(t *testing.T) {
 	reviewer := &fakeReviewerForPreflight{}
 	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, &fakeRuntime{}, "")
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); err == nil || !strings.Contains(err.Error(), "empty command") {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); err == nil || !strings.Contains(err.Error(), "empty command") {
 		t.Fatalf("err = %v, want 'empty command'", err)
 	}
 }
@@ -1234,7 +1234,7 @@ func TestLauncherPreflightEmptyArgv(t *testing.T) {
 func TestLauncherPreflightBinaryNotFound(t *testing.T) {
 	reviewer := &fakeReviewerForPreflight{Argv: []string{"this-binary-does-not-exist-12345"}}
 	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, &fakeRuntime{}, "")
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); err == nil || !strings.Contains(err.Error(), "not found") {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, want 'not found'", err)
 	}
 }
@@ -1242,7 +1242,7 @@ func TestLauncherPreflightBinaryNotFound(t *testing.T) {
 func TestLauncherPreflightSkipsEnvPrefix(t *testing.T) {
 	reviewer := &fakeReviewerForPreflight{Argv: []string{"env", "OPENCODE_CONFIG_CONTENT=cfg", "go"}}
 	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, &fakeRuntime{}, "")
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); err != nil {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); err != nil {
 		t.Fatalf("Preflight: %v", err)
 	}
 }
@@ -1250,7 +1250,7 @@ func TestLauncherPreflightSkipsEnvPrefix(t *testing.T) {
 func TestLauncherPreflightEnvPrefixWithMissingBinary(t *testing.T) {
 	reviewer := &fakeReviewerForPreflight{Argv: []string{"env", "KEY=val", "nonexistent-binary-999"}}
 	l := NewLauncher(fakeReviewerResolver{reviewer: reviewer, ok: true}, &fakeRuntime{}, "")
-	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1"); err == nil || !strings.Contains(err.Error(), "not found") {
+	if err := l.Preflight(context.Background(), domain.ReviewerClaudeCode, "/ws/mer-1", ports.PermissionModeAuto); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, want 'not found'", err)
 	}
 }

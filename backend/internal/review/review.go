@@ -642,7 +642,7 @@ func (e *Engine) TriggerWithOptions(ctx stdctx.Context, workerID domain.SessionI
 			return TriggerResult{}, failRuns(0, err)
 		}
 		defer releaseHarness()
-		if err := e.launcher.Preflight(ctx, harness, worker.Metadata.WorkspacePath, selectedMode); err != nil {
+		if err := e.launcher.Preflight(ctx, harness, worker.Metadata.WorkspacePath, config.Permissions, selectedMode); err != nil {
 			return TriggerResult{}, failRuns(0, fmt.Errorf("reviewer preflight: %w", err))
 		}
 		// A review owns one Chat controller. Stop it while its durable fence
@@ -1110,12 +1110,22 @@ func (e *Engine) restorePersistedChatReviewerLocked(ctx stdctx.Context, worker d
 	if err != nil {
 		return RestoreReviewerResult{}, err
 	}
+	// Restores re-resolve the reviewer config the same way a fresh trigger
+	// does, so a restored reviewer keeps the configured permission mode. The
+	// config only applies when the persisted reviewer is still the selected
+	// one; a preference switch is picked up by the next restore.
+	var config domain.AgentConfig
+	if selected, selectedConfig, selErr := e.reviewerSelection(ctx, worker); selErr != nil {
+		return RestoreReviewerResult{}, selErr
+	} else if selected == review.Harness {
+		config = selectedConfig
+	}
 	releaseHarness, err := e.beginHarnessUse(review.Harness)
 	if err != nil {
 		return RestoreReviewerResult{}, err
 	}
 	defer releaseHarness()
-	launch, err := e.launcher.RestoreTerminal(ctx, LaunchSpec{ReviewSessionID: review.ID, LaunchID: launchID, WorkerID: worker.ID, ProjectID: worker.ProjectID, ProjectEnv: projectEnv, Harness: review.Harness, WorkspacePath: worker.Metadata.WorkspacePath, AgentSessionID: review.AgentSessionID, ProviderConversationID: review.ProviderConversationID, PreviousRuns: previousRuns, InterfaceMode: review.InterfaceMode})
+	launch, err := e.launcher.RestoreTerminal(ctx, LaunchSpec{ReviewSessionID: review.ID, LaunchID: launchID, WorkerID: worker.ID, ProjectID: worker.ProjectID, ProjectEnv: projectEnv, Harness: review.Harness, AgentConfig: config, WorkspacePath: worker.Metadata.WorkspacePath, AgentSessionID: review.AgentSessionID, ProviderConversationID: review.ProviderConversationID, PreviousRuns: previousRuns, InterfaceMode: review.InterfaceMode})
 	if err != nil {
 		return RestoreReviewerResult{}, fmt.Errorf("restore reviewer: %w", err)
 	}

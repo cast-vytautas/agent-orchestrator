@@ -376,7 +376,7 @@ type sqliteReviewChatController struct {
 }
 
 func (c sqliteReviewChatController) SupportsReviewChat(domain.AgentHarness) bool { return true }
-func (c sqliteReviewChatController) PreflightReviewChat(context.Context, domain.AgentHarness) error {
+func (c sqliteReviewChatController) PreflightReviewChat(context.Context, domain.AgentHarness, ports.PermissionMode) error {
 	return nil
 }
 func (c sqliteReviewChatController) StartReviewChat(ctx context.Context, cfg ReviewerChatStart) (string, error) {
@@ -519,7 +519,7 @@ func (f *fakeLauncher) Destroy(_ context.Context, handleID string) error {
 	}
 	return nil
 }
-func (f *fakeLauncher) Preflight(_ context.Context, _ domain.ReviewerHarness, _ string, _ ...domain.ReviewerInterfaceMode) error {
+func (f *fakeLauncher) Preflight(_ context.Context, _ domain.ReviewerHarness, _ string, _ ports.PermissionMode, _ ...domain.ReviewerInterfaceMode) error {
 	f.preflighted = true
 	return f.preflightErr
 }
@@ -622,6 +622,28 @@ func TestReviewerOperationsWaitForStartupRecovery(t *testing.T) {
 	}
 }
 
+func TestRecoverChatReviewersCarriesProjectReviewerPermissionsIntoRestore(t *testing.T) {
+	review := domain.Review{ID: "rev-1", SessionID: "mer-1", Harness: domain.ReviewerCodex,
+		InterfaceMode: domain.ReviewerInterfaceChat, ReviewerActivityState: domain.ActivityExited}
+	store := &fakeStore{review: &review, recoverableReviews: []domain.Review{review}}
+	launcher := &fakeLauncher{interfaceMode: domain.ReviewerInterfaceChat, handle: "chat-review:rev-1"}
+	projects := fakeProjects{cfg: domain.ProjectConfig{Reviewers: []domain.ReviewerConfig{{
+		Harness:     domain.ReviewerCodex,
+		AgentConfig: domain.AgentConfig{Permissions: domain.PermissionModeBypassPermissions},
+	}}}}
+	eng := newEngineForTest(store, fakeSessions{rec: liveWorker(), ok: true}, prAt("sha1"), projects, launcher)
+
+	if err := eng.RecoverChatReviewers(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !launcher.restored {
+		t.Fatal("recoverable chat reviewer was not restored")
+	}
+	if launcher.gotSpec.AgentConfig.Permissions != domain.PermissionModeBypassPermissions {
+		t.Fatalf("restored reviewer permissions = %q, want project bypass-permissions", launcher.gotSpec.AgentConfig.Permissions)
+	}
+}
+
 func TestTriggerSpawnsNewReviewerAndRecordsRunAfterLaunch(t *testing.T) {
 	store := &fakeStore{}
 	launcher := &fakeLauncher{handle: "review-mer-1"}
@@ -680,6 +702,28 @@ func TestTriggerPersistsChatModeBeforeCreatingReviewerConversation(t *testing.T)
 	}
 	if _, err := store.ConversationForReview(ctx, review.ID); err != nil {
 		t.Fatalf("ConversationForReview: %v", err)
+	}
+}
+
+func TestTriggerCarriesProjectReviewerPermissionsIntoChatStart(t *testing.T) {
+	ctx := context.Background()
+	store := newSQLiteReviewStore(t)
+	worker := liveWorker()
+	seedReviewWorker(t, store, worker)
+	var started ReviewerChatStart
+	chat := sqliteReviewChatController{store: store, started: &started}
+	launcher := NewLauncher(singleReviewerResolver{reviewer: chatReviewAdapter{}}, &fakeRuntime{}, t.TempDir(), WithReviewerChat(chat))
+	projects := fakeProjects{cfg: domain.ProjectConfig{Reviewers: []domain.ReviewerConfig{{
+		Harness:     domain.ReviewerCodex,
+		AgentConfig: domain.AgentConfig{Permissions: domain.PermissionModeBypassPermissions},
+	}}}}
+	eng := newEngineForTest(store, fakeSessions{rec: worker, ok: true}, prAt("sha1"), projects, launcher)
+
+	if _, err := trigger(ctx, eng, worker.ID, "", domain.AgentConfig{}); err != nil {
+		t.Fatalf("Trigger: %v", err)
+	}
+	if started.Permissions != domain.PermissionModeBypassPermissions {
+		t.Fatalf("reviewer Chat permissions = %q, want project bypass-permissions", started.Permissions)
 	}
 }
 

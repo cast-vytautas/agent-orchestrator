@@ -778,8 +778,8 @@ func (c chatLauncher) SupportsReviewChat(harness domain.AgentHarness) bool {
 	return c.svc.SupportsChat(harness)
 }
 
-func (c chatLauncher) PreflightReviewChat(ctx context.Context, harness domain.AgentHarness) error {
-	return c.svc.PreflightChat(ctx, harness, ports.PermissionModeAuto)
+func (c chatLauncher) PreflightReviewChat(ctx context.Context, harness domain.AgentHarness, permissions ports.PermissionMode) error {
+	return c.svc.PreflightChat(ctx, harness, reviewChatPermissionMode(permissions))
 }
 
 func (c chatLauncher) StartReviewChat(ctx context.Context, cfg reviewcore.ReviewerChatStart) (string, error) {
@@ -795,7 +795,7 @@ func (c chatLauncher) startReviewChat(ctx context.Context, cfg reviewcore.Review
 		return "", err
 	}
 	owner := domain.ReviewConversationOwner(cfg.ReviewID)
-	started, err := c.svc.StartChat(ctx, chatsvc.StartConfig{Owner: owner, SessionID: cfg.WorkerID, ProjectID: cfg.ProjectID, Kind: domain.KindWorker, Harness: cfg.Harness, DataDir: cfg.DataDir, WorkspacePath: cfg.WorkspacePath, Env: cfg.Env, Model: cfg.Model, Effort: cfg.Effort, Permissions: ports.PermissionModeAuto, SystemPrompt: cfg.SystemPrompt, ProviderConversationID: cfg.ProviderConversationID})
+	started, err := c.svc.StartChat(ctx, chatsvc.StartConfig{Owner: owner, SessionID: cfg.WorkerID, ProjectID: cfg.ProjectID, Kind: domain.KindWorker, Harness: cfg.Harness, DataDir: cfg.DataDir, WorkspacePath: cfg.WorkspacePath, Env: cfg.Env, Model: cfg.Model, Effort: cfg.Effort, Permissions: reviewChatPermissionMode(cfg.Permissions), SystemPrompt: cfg.SystemPrompt, ProviderConversationID: cfg.ProviderConversationID})
 	if err != nil {
 		return "", err
 	}
@@ -807,6 +807,15 @@ func (c chatLauncher) startReviewChat(ctx context.Context, cfg reviewcore.Review
 		return "", err
 	}
 	return started.ProviderConversationID, nil
+}
+
+// reviewChatPermissionMode starts reviewer chats in auto when no project or
+// session reviewer config resolved an explicit permission mode. An explicit
+// reviewer permission (e.g. bypass) flows through, mirroring the terminal
+// reviewer path; workers' own permissions never inherit into a reviewer, so
+// they cannot reach here (see ProjectConfig.DefaultWorkerReviewer).
+func reviewChatPermissionMode(mode ports.PermissionMode) ports.PermissionMode {
+	return ports.ReviewerPermissionMode(mode)
 }
 
 func (c chatLauncher) SendReviewChat(ctx context.Context, reviewID, message, batchID string) error {

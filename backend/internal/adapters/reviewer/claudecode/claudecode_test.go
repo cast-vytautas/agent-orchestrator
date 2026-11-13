@@ -83,12 +83,12 @@ func TestReviewCommandLaunchesReadOnlyOffBypass(t *testing.T) {
 		t.Fatalf("ReviewCommand: %v", err)
 	}
 
-	// The allowlist and the PermissionRequest hook enforce read-only, so the
-	// pane must start in Claude's default mode whatever the user's defaultMode
-	// is: bypassPermissions ignores the rules, and auto approves shell writes
-	// without prompting the hook.
+	// Without a configured reviewer permission the pane must start in Claude's
+	// default mode whatever the user's defaultMode is: the allowlist and the
+	// PermissionRequest hook enforce read-only, bypassPermissions ignores the
+	// rules, and auto approves shell writes without prompting the hook.
 	if agent.got.Permissions != ports.PermissionModeDefault {
-		t.Fatalf("reviewer must request AO's default mode; got %q", agent.got.Permissions)
+		t.Fatalf("reviewer without configured permissions must default to AO's default mode; got %q", agent.got.Permissions)
 	}
 	if !containsPair(spec.Argv, "--permission-mode", "default") ||
 		!containsPair(spec.Argv, "--settings", `{"permissions":{"defaultMode":"default"}}`) {
@@ -130,6 +130,30 @@ func TestReviewCommandLaunchesReadOnlyOffBypass(t *testing.T) {
 		if !contains(agent.got.DisallowedTools, denied) {
 			t.Fatalf("disallow list missing %q: %#v", denied, agent.got.DisallowedTools)
 		}
+	}
+}
+
+func TestReviewCommandHonorsConfiguredPermissions(t *testing.T) {
+	agent := &captureAgent{}
+	r := &Reviewer{agent: agent}
+
+	spec, err := r.ReviewCommand(context.Background(), ports.ReviewInvocation{
+		ReviewerID:    "review-w1",
+		WorkspacePath: "/ws/w1",
+		Prompt:        "review it",
+		Config:        ports.AgentConfig{Permissions: ports.PermissionModeBypassPermissions},
+	})
+	if err != nil {
+		t.Fatalf("ReviewCommand: %v", err)
+	}
+	if agent.got.Permissions != ports.PermissionModeBypassPermissions {
+		t.Fatalf("configured reviewer permissions = %q, want bypass-permissions verbatim", agent.got.Permissions)
+	}
+	// The configured mode must also survive the launch argv: pinDefaultMode
+	// exists to keep an unset config read-only, not to clobber an explicit one.
+	if containsPair(spec.Argv, "--permission-mode", "default") ||
+		containsPair(spec.Argv, "--settings", `{"permissions":{"defaultMode":"default"}}`) {
+		t.Fatalf("configured reviewer permissions pinned back to default: %#v", spec.Argv)
 	}
 }
 
@@ -305,6 +329,29 @@ func TestReviewRestoreCommandUsesNativeSessionIDAndReadOnlyPolicy(t *testing.T) 
 	}
 	if !contains(agent.gotRestore.AllowedTools, "Read") || !contains(agent.gotRestore.DisallowedTools, "Write") || !contains(agent.gotRestore.DisallowedTools, "Bash(gh pr merge:*)") {
 		t.Fatalf("restore tool policy allowed=%#v disallowed=%#v", agent.gotRestore.AllowedTools, agent.gotRestore.DisallowedTools)
+	}
+}
+
+func TestReviewRestoreCommandHonorsConfiguredPermissions(t *testing.T) {
+	agent := &captureAgent{}
+	r := &Reviewer{agent: agent}
+
+	got, ok, err := r.ReviewRestoreCommand(context.Background(), ports.ReviewInvocation{
+		ReviewerID:     "review-w1",
+		RunID:          "run-2",
+		AgentSessionID: "claude-native-1",
+		Config:         ports.AgentConfig{Permissions: ports.PermissionModeBypassPermissions},
+	})
+	if err != nil || !ok {
+		t.Fatalf("ReviewRestoreCommand = (ok=%v, err=%v), want restore", ok, err)
+	}
+	if agent.gotRestore.Permissions != ports.PermissionModeBypassPermissions {
+		t.Fatalf("restore permissions = %q, want bypass-permissions verbatim", agent.gotRestore.Permissions)
+	}
+	// A configured mode carries its own launch flags; the default-mode pin
+	// must not clobber it back to read-only default.
+	if strings.Join(got.Argv, " ") != "claude --resume claude-native-1" {
+		t.Fatalf("argv = %#v, want the configured mode without the default pin", got.Argv)
 	}
 }
 

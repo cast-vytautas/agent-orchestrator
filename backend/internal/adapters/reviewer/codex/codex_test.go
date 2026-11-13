@@ -69,10 +69,27 @@ func TestReviewCommandUsesReadOnlySandbox(t *testing.T) {
 		t.Fatalf("argv = %#v, want %#v", got.Argv, want)
 	}
 	if agent.got.Permissions != ports.PermissionModeAuto {
-		t.Fatalf("permissions = %q, want auto", agent.got.Permissions)
+		t.Fatalf("reviewer without configured permissions must default to auto; got %q", agent.got.Permissions)
 	}
 	if agent.got.SystemPrompt != "review only" {
 		t.Fatalf("system prompt = %q", agent.got.SystemPrompt)
+	}
+}
+
+func TestReviewCommandHonorsConfiguredPermissions(t *testing.T) {
+	agent := &captureAgent{}
+	r := &Reviewer{agent: agent}
+
+	if _, err := r.ReviewCommand(context.Background(), ports.ReviewInvocation{
+		ReviewerID:    "review-w1",
+		WorkspacePath: "/ws/w1",
+		Prompt:        "review it",
+		Config:        ports.AgentConfig{Permissions: ports.PermissionModeBypassPermissions},
+	}); err != nil {
+		t.Fatalf("ReviewCommand: %v", err)
+	}
+	if agent.got.Permissions != ports.PermissionModeBypassPermissions {
+		t.Fatalf("configured reviewer permissions = %q, want bypass-permissions verbatim", agent.got.Permissions)
 	}
 }
 

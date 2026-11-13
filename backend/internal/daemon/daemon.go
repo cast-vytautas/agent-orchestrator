@@ -1428,6 +1428,9 @@ func Run(buildVersion string) (retErr error) {
 			if reconcileErr := sessMgr.ReconcileBackground(ctx); reconcileErr != nil {
 				log.Error("background session reconciliation on boot failed", "err", reconcileErr)
 			}
+			if resumeErr := sessMgr.ResumeStartupSettledSessions(ctx); resumeErr != nil {
+				log.Warn("startup resume of crash-killed sessions failed", "err", resumeErr)
+			}
 			if reconcileErr := lcStack.ReconcileRuntime(ctx); reconcileErr != nil {
 				log.Error("background agent-process reconciliation on boot failed", "err", reconcileErr)
 				sentryobs.CaptureBackground(ctx, reconcileErr, "lifecycle", "reconcile", map[string]string{"reason": "runtime"})

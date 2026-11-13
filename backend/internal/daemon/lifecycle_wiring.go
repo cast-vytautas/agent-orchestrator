@@ -244,6 +244,12 @@ type sessionLifecycle interface {
 	MarkHarnessUpdated(ctx context.Context, harness domain.AgentHarness, version string, at time.Time) error
 	CountStaleBinarySessions(ctx context.Context) (map[domain.AgentHarness]int64, error)
 	RestoreAll(ctx context.Context) error
+	// ResumeStartupSettledSessions relaunches, in place, the terminal sessions
+	// the startup health check settled after proving their runtime dead while
+	// AO was down. Called after background reconcile and before the boot
+	// reaper fold so crash victims resume under their existing ids instead of
+	// being terminated and respawned under new numbers.
+	ResumeStartupSettledSessions(ctx context.Context) error
 	WaitBackgroundWorkers(ctx context.Context) error
 	WaitAgentSwitchWorkers(ctx context.Context) error
 	StopAgentsForQuit(ctx context.Context) error

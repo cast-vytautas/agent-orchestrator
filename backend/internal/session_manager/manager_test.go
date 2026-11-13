@@ -2482,7 +2482,7 @@ func TestResumeAgent_FallsBackToRuntimeRecreateWithoutRestartCapability(t *testi
 	}
 }
 
-func TestResumeAgent_RequiresLiveExitedSession(t *testing.T) {
+func TestResumeAgent_RefusesIdleAndRecoversTerminated(t *testing.T) {
 	runtime := &fakeRuntime{aliveByHandle: map[string]bool{"tmux-mer-1": true}}
 	agent := supervisedLaunchAgent{launchArgvAgent{argv: []string{"codex", "resume", "agent-x"}}}
 	m, st, _ := newExitedResumeManager(t, runtime, agent)
@@ -2494,14 +2494,21 @@ func TestResumeAgent_RequiresLiveExitedSession(t *testing.T) {
 		t.Fatalf("idle resume error = %v, want ErrAgentNotExited", err)
 	}
 
+	// A terminated session recovers through the same Resume action: callers
+	// must not need a separate restore to relaunch it, and never get a fresh
+	// session id — after an environment crash this is what keeps the desktop
+	// from spawning a replacement session under the next number.
 	rec.Activity.State = domain.ActivityExited
 	rec.IsTerminated = true
 	st.sessions["mer-1"] = rec
-	if _, err := m.ResumeAgentWithMode(ctx, "mer-1"); !errors.Is(err, ErrTerminated) {
-		t.Fatalf("terminated resume error = %v, want ErrTerminated", err)
+	if _, err := m.ResumeAgentWithMode(ctx, "mer-1"); err != nil {
+		t.Fatalf("terminated resume err = %v, want in-place recovery", err)
 	}
-	if runtime.created != 0 || runtime.destroyed != 0 {
-		t.Fatalf("invalid resume touched runtime: created=%d destroyed=%d", runtime.created, runtime.destroyed)
+	if st.sessions["mer-1"].IsTerminated {
+		t.Fatal("terminated resume left the session terminated")
+	}
+	if got := st.sessions["mer-1"].Metadata.RuntimeHandleID; got != "h1" {
+		t.Fatalf("recovered runtime handle = %q, want relaunched h1", got)
 	}
 }
 

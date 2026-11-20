@@ -56,10 +56,11 @@ func TestReviewCommandAppliesBestEffortPolicyOffBypass(t *testing.T) {
 		t.Fatalf("ReviewCommand: %v", err)
 	}
 
-	// The policy is only useful in an explicit non-bypass mode: --yolo ignores
-	// allow/deny rules, and an empty mode would defer to Kimchi's default.
+	// Without a configured reviewer permission, the launch falls back to auto:
+	// --yolo ignores allow/deny rules, and an empty mode would defer to
+	// Kimchi's default.
 	if agent.got.Permissions != ports.PermissionModeAuto {
-		t.Fatalf("reviewer must launch in auto permission mode; got %q", agent.got.Permissions)
+		t.Fatalf("reviewer without configured permissions must default to auto; got %q", agent.got.Permissions)
 	}
 	if agent.got.Config.Model != "sonnet-5" {
 		t.Fatalf("launch config model = %q, want sonnet-5", agent.got.Config.Model)
@@ -82,6 +83,23 @@ func TestReviewCommandAppliesBestEffortPolicyOffBypass(t *testing.T) {
 		if !contains(agent.got.DisallowedTools, denied) {
 			t.Fatalf("disallow list missing %q: %#v", denied, agent.got.DisallowedTools)
 		}
+	}
+}
+
+func TestReviewCommandHonorsConfiguredPermissions(t *testing.T) {
+	agent := &captureAgent{}
+	r := &Reviewer{agent: agent}
+
+	if _, err := r.ReviewCommand(context.Background(), ports.ReviewInvocation{
+		ReviewerID:    "review-w1",
+		WorkspacePath: "/ws/w1",
+		Prompt:        "review it",
+		Config:        ports.AgentConfig{Permissions: ports.PermissionModeBypassPermissions},
+	}); err != nil {
+		t.Fatalf("ReviewCommand: %v", err)
+	}
+	if agent.got.Permissions != ports.PermissionModeBypassPermissions {
+		t.Fatalf("configured reviewer permissions = %q, want bypass-permissions verbatim", agent.got.Permissions)
 	}
 }
 
@@ -198,10 +216,26 @@ func TestReviewRestoreCommandUsesNativeSessionAndReappliesPolicy(t *testing.T) {
 		t.Fatalf("restore metadata = %#v", agent.gotRestore.Session.Metadata)
 	}
 	if agent.gotRestore.Permissions != ports.PermissionModeAuto {
-		t.Fatalf("restore permissions = %q, want auto", agent.gotRestore.Permissions)
+		t.Fatalf("restore without configured permissions must default to auto; got %q", agent.gotRestore.Permissions)
 	}
 	if !contains(agent.gotRestore.AllowedTools, "read") || !contains(agent.gotRestore.DisallowedTools, "write") {
 		t.Fatalf("restore tool policy allowed=%#v disallowed=%#v", agent.gotRestore.AllowedTools, agent.gotRestore.DisallowedTools)
+	}
+}
+
+func TestReviewRestoreCommandHonorsConfiguredPermissions(t *testing.T) {
+	agent := &captureAgent{}
+	r := &Reviewer{agent: agent}
+
+	if _, ok, err := r.ReviewRestoreCommand(context.Background(), ports.ReviewInvocation{
+		ReviewerID:     "review-w1",
+		AgentSessionID: "kimchi-native-1",
+		Config:         ports.AgentConfig{Permissions: ports.PermissionModeBypassPermissions},
+	}); err != nil || !ok {
+		t.Fatalf("ReviewRestoreCommand = ok %v, err %v", ok, err)
+	}
+	if agent.gotRestore.Permissions != ports.PermissionModeBypassPermissions {
+		t.Fatalf("restore permissions = %q, want bypass-permissions verbatim", agent.gotRestore.Permissions)
 	}
 }
 

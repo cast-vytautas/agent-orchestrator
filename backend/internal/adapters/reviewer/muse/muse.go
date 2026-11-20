@@ -30,9 +30,11 @@ var _ ports.ReviewerCanceller = (*Reviewer)(nil)
 var _ ports.ReviewerRestorer = (*Reviewer)(nil)
 
 // ReviewCommand launches Muse's interactive TUI with writes disabled. Muse
-// supplies its own sandbox and approval machinery; AO keeps the reviewer in
-// auto approval so read/report commands can run unattended while --disable-write
-// prevents non-shell workspace file writes.
+// supplies its own sandbox and approval machinery; without a configured
+// reviewer permission, AO keeps the reviewer in auto approval so read/report
+// commands can run unattended while --disable-write prevents non-shell
+// workspace file writes. A configured reviewer permission (project, session,
+// or trigger) flows through verbatim.
 func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, error) {
 	argv, err := r.agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		Config:           inv.Config,
@@ -41,7 +43,7 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 		Prompt:           inv.Prompt,
 		SystemPrompt:     inv.SystemPrompt,
 		SystemPromptFile: inv.SystemPromptFile,
-		Permissions:      ports.PermissionModeAuto,
+		Permissions:      ports.ReviewerPermissionMode(inv.Config.Permissions),
 		DataDir:          inv.DataDir,
 	})
 	if err != nil {
@@ -53,7 +55,7 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 // ReviewRestoreCommand resumes the reviewer Muse conversation captured from
 // hooks, reapplying the same no-write reviewer launch flag.
 func (r *Reviewer) ReviewRestoreCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, bool, error) {
-	cmd, ok, err := agentrestore.Command(ctx, r.agent, inv, agentrestore.Options{Permissions: ports.PermissionModeAuto})
+	cmd, ok, err := agentrestore.Command(ctx, r.agent, inv, agentrestore.Options{Permissions: ports.ReviewerPermissionMode(inv.Config.Permissions)})
 	if err != nil || !ok {
 		return cmd, ok, err
 	}

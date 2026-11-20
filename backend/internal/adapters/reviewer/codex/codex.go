@@ -45,8 +45,10 @@ var _ ports.ReviewerChatProfile = (*Reviewer)(nil)
 func (r *Reviewer) ReviewChatHarness() domain.AgentHarness { return domain.HarnessCodex }
 
 // ReviewCommand launches the reviewer with an enforced read-only filesystem
-// sandbox. Auto approval lets the headless session request the narrowly needed
-// network access for posting the review and reporting its result.
+// sandbox. Without a configured reviewer permission, auto approval lets the
+// headless session request the narrowly needed network access for posting the
+// review and reporting its result. A configured reviewer permission (project,
+// session, or trigger) flows through verbatim.
 func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, error) {
 	argv, err := r.agent.GetLaunchCommand(ctx, ports.LaunchConfig{
 		Config:           inv.Config,
@@ -55,7 +57,7 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 		Prompt:           inv.Prompt,
 		SystemPrompt:     inv.SystemPrompt,
 		SystemPromptFile: inv.SystemPromptFile,
-		Permissions:      ports.PermissionModeAuto,
+		Permissions:      ports.ReviewerPermissionMode(inv.Config.Permissions),
 	})
 	if err != nil {
 		return ports.ReviewCommandSpec{}, err
@@ -70,7 +72,7 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 // ReviewRestoreCommand resumes the reviewer Codex conversation captured from
 // Codex hooks when AO recreates the reviewer pane after worker restore.
 func (r *Reviewer) ReviewRestoreCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, bool, error) {
-	cmd, ok, err := agentrestore.Command(ctx, r.agent, inv, agentrestore.Options{Permissions: ports.PermissionModeAuto})
+	cmd, ok, err := agentrestore.Command(ctx, r.agent, inv, agentrestore.Options{Permissions: ports.ReviewerPermissionMode(inv.Config.Permissions)})
 	if err != nil || !ok {
 		return cmd, ok, err
 	}

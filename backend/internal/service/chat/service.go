@@ -2466,18 +2466,22 @@ func (s *Service) PreflightChat(
 	return chatAdmissionError(driver, harness, caps, permissions)
 }
 
-// PreflightReviewChat admits a Chat reviewer and proves the provider's
-// read-only sandbox can actually start in the worker's checkout.
+// PreflightReviewChat admits a Chat reviewer with its resolved permissions and,
+// for the default auto mode, proves the provider's read-only sandbox can start
+// in the worker's checkout.
 //
-// A reviewer runs read-only with approvals disabled, so the sandbox is its only
-// route to read the pinned diff and to submit the result. A host that cannot
+// An auto reviewer runs read-only with approvals disabled, so the sandbox is its
+// only route to read the pinned diff and to submit the result. A host that cannot
 // start that sandbox (for example a container whose seccomp profile or an
 // AppArmor policy denies user namespaces) would otherwise launch a turn that
 // cannot run a single command and fail with a generic "turn ended without
 // submitting a result" instead of the provider's real error.
-func (s *Service) PreflightReviewChat(ctx context.Context, harness domain.AgentHarness, workspacePath string) error {
-	if err := s.PreflightChat(ctx, harness, ports.PermissionModeAuto); err != nil {
+func (s *Service) PreflightReviewChat(ctx context.Context, harness domain.AgentHarness, workspacePath string, permissions ports.PermissionMode) error {
+	if err := s.PreflightChat(ctx, harness, permissions); err != nil {
 		return err
+	}
+	if permissions != ports.PermissionModeAuto {
+		return nil
 	}
 	driver, err := s.drivers.Driver(harness)
 	if err != nil {

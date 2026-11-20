@@ -66,7 +66,7 @@ func TestReviewCommandUsesMuseNoWriteSandbox(t *testing.T) {
 		t.Fatalf("launch config = %+v", agent.got)
 	}
 	if agent.got.Permissions != ports.PermissionModeAuto {
-		t.Fatalf("permissions = %q, want auto", agent.got.Permissions)
+		t.Fatalf("reviewer without configured permissions must default to auto; got %q", agent.got.Permissions)
 	}
 	if agent.got.Config.Mode != "plan" {
 		t.Fatalf("launch config mode = %q, want plan", agent.got.Config.Mode)
@@ -76,6 +76,23 @@ func TestReviewCommandUsesMuseNoWriteSandbox(t *testing.T) {
 	}
 	if agent.got.DataDir != "/ao/data" {
 		t.Fatalf("data dir = %q, want /ao/data", agent.got.DataDir)
+	}
+}
+
+func TestReviewCommandHonorsConfiguredPermissions(t *testing.T) {
+	agent := &captureAgent{}
+	r := &Reviewer{agent: agent}
+
+	if _, err := r.ReviewCommand(context.Background(), ports.ReviewInvocation{
+		ReviewerID:    "review-w1",
+		WorkspacePath: "/ws/w1",
+		Prompt:        "Read the AO review task.",
+		Config:        ports.AgentConfig{Permissions: ports.PermissionModeBypassPermissions},
+	}); err != nil {
+		t.Fatalf("ReviewCommand: %v", err)
+	}
+	if agent.got.Permissions != ports.PermissionModeBypassPermissions {
+		t.Fatalf("configured reviewer permissions = %q, want bypass-permissions verbatim", agent.got.Permissions)
 	}
 }
 

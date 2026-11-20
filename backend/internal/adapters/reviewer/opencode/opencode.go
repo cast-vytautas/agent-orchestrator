@@ -57,7 +57,7 @@ func (r *Reviewer) ReviewCommand(ctx context.Context, inv ports.ReviewInvocation
 		WorkspacePath:    inv.WorkspacePath,
 		Prompt:           prompt,
 		SystemPromptFile: inv.SystemPromptFile,
-		Permissions:      ports.PermissionModeAuto,
+		Permissions:      ports.ReviewerPermissionMode(inv.Config.Permissions),
 	})
 	if err != nil {
 		return ports.ReviewCommandSpec{}, err
@@ -113,7 +113,7 @@ func (r *Reviewer) ReviewMessage(_ context.Context, inv ports.ReviewInvocation) 
 // ReviewRestoreCommand resumes the reviewer OpenCode conversation captured
 // from hooks, reapplying the same read-only reviewer config as a fresh launch.
 func (r *Reviewer) ReviewRestoreCommand(ctx context.Context, inv ports.ReviewInvocation) (ports.ReviewCommandSpec, bool, error) {
-	cmd, ok, err := agentrestore.Command(ctx, r.agent, inv, agentrestore.Options{Permissions: ports.PermissionModeAuto})
+	cmd, ok, err := agentrestore.Command(ctx, r.agent, inv, agentrestore.Options{Permissions: ports.ReviewerPermissionMode(inv.Config.Permissions)})
 	if err != nil || !ok {
 		return cmd, ok, err
 	}

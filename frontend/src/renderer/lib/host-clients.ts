@@ -46,6 +46,9 @@ export function clientForHost(hostId: HostId) {
 	if (hostId === LOCAL_HOST) throw new Error("local is not a remote host");
 	const host = hosts.get(hostId);
 	if (!host) {
+		// A liveness blip can evict a host before the user next speaks to it;
+		// start the reconnect now so the next render or retry finds it back.
+		void reconnectHost(hostId).catch(() => undefined);
 		const error = new Error(`Host ${hostId} is not connected`);
 		markApiError(error);
 		throw error;
@@ -56,6 +59,37 @@ export function clientForHost(hostId: HostId) {
 		clients.set(hostId, client);
 	}
 	return client;
+}
+
+const reconnecting = new Map<HostId, Promise<void>>();
+
+/**
+ * Re-adopt a saved host a failed liveness check dropped from the connected
+ * map. Answers without touching the map when the host is no longer saved;
+ * the caller's clientForHost then throws as before.
+ */
+export async function reconnectHost(hostId: HostId): Promise<void> {
+	if (hosts.has(hostId)) return;
+	const pending = reconnecting.get(hostId);
+	if (pending) return pending;
+	const attempt = (async () => {
+		if (hosts.has(hostId)) return;
+		const saved = await aoBridge.remotes.list();
+		const entry = saved.find((host) => host.hostId === hostId);
+		if (!entry) return;
+		await connectHost(entry.url, hostId);
+	})().finally(() => reconnecting.delete(hostId));
+	reconnecting.set(hostId, attempt);
+	return attempt;
+}
+
+/**
+ * The session's host client, reconnecting a dropped host first. A host that
+ * will not come back rejects with the same error clientForHost throws.
+ */
+export async function clientForSessionHostOnDemand(hostId?: HostId) {
+	if (hostId && hostId !== LOCAL_HOST && !hosts.has(hostId)) await reconnectHost(hostId).catch(() => undefined);
+	return clientForSessionHost(hostId);
 }
 
 /** Resolve the daemon that owns a session at the point a request is made. */

@@ -26,7 +26,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { components } from "../../api/schema";
 import { apiErrorCode, apiErrorMessage } from "../lib/api-client";
-import { baseUrlForHost, clientForSessionHost } from "../lib/host-clients";
+import { baseUrlForHost, clientForSessionHost, clientForSessionHostOnDemand } from "../lib/host-clients";
 import { HOST_UNREACHABLE_CODES, sessionUiKey } from "../lib/hosts";
 import { subscribeWorkspaceFileChanges } from "../lib/workspace-file-events";
 import { toWireAttachments, type OutgoingAttachment } from "../lib/attachment-uploads";
@@ -910,7 +910,7 @@ export function useProviderSwitchCommand(sessionId: string, hostId?: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: async (request: Omit<components["schemas"]["ProviderSwitchRequest"], "idempotencyKey">) => {
-			const { data, error, response } = await clientForSessionHost(hostId).POST("/api/v1/sessions/{sessionId}/provider-switch", {
+			const { data, error, response } = await (await clientForSessionHostOnDemand(hostId)).POST("/api/v1/sessions/{sessionId}/provider-switch", {
 				params: { path: { sessionId } },
 				body: { ...request, idempotencyKey: crypto.randomUUID() },
 			});
@@ -1037,7 +1037,7 @@ export function useConversationCommands(sessionId: string | undefined, hostId?: 
 			if (providerSwitch) {
 				// One request: the daemon switches, then sends, without waiting on a refetch here.
 				const refresh = () => void refreshAfterProviderSwitch(queryClient, targetSessionId, hostId).catch(() => {});
-				const { data, error, response } = await clientForSessionHost(hostId).POST("/api/v1/sessions/{sessionId}/provider-switch", {
+				const { data, error, response } = await (await clientForSessionHostOnDemand(hostId)).POST("/api/v1/sessions/{sessionId}/provider-switch", {
 					params: { path: { sessionId: targetSessionId } },
 					headers: input.attachments?.length ? { "X-AO-Attachment-Upload": "1" } : undefined,
 					body: { ...providerSwitch, idempotencyKey: crypto.randomUUID(), message: { ...message, clientMessageId } },
@@ -1053,7 +1053,7 @@ export function useConversationCommands(sessionId: string | undefined, hostId?: 
 				const accepted: components["schemas"]["SendConversationMessageResponse"] = data.message ?? { duplicate: true };
 				return accepted;
 			}
-			const { data, error } = await clientForSessionHost(hostId).POST(
+			const { data, error } = await (await clientForSessionHostOnDemand(hostId)).POST(
 				"/api/v1/sessions/{sessionId}/conversation/messages",
 				{
 					params: { path: { sessionId: targetSessionId } },
@@ -1134,7 +1134,7 @@ export function useConversationCommands(sessionId: string | undefined, hostId?: 
 
 	const resolve = useMutation({
 		mutationFn: async (input: { requestId: string; decisionId: string }) => {
-			const { error } = await clientForSessionHost(hostId).POST(
+			const { error } = await (await clientForSessionHostOnDemand(hostId)).POST(
 				"/api/v1/sessions/{sessionId}/conversation/approvals/{requestId}/resolve",
 				{
 					params: {
@@ -1158,7 +1158,7 @@ export function useConversationCommands(sessionId: string | undefined, hostId?: 
 			action: "accept" | "decline" | "cancel";
 			content?: Record<string, unknown>;
 		}) => {
-			const { error } = await clientForSessionHost(hostId).POST(
+			const { error } = await (await clientForSessionHostOnDemand(hostId)).POST(
 				"/api/v1/sessions/{sessionId}/conversation/inputs/{requestId}/resolve",
 				{
 					params: {
@@ -1178,7 +1178,7 @@ export function useConversationCommands(sessionId: string | undefined, hostId?: 
 
 	const interrupt = useMutation({
 		mutationFn: async ({ targetSessionId }: ConversationSessionMutationInput) => {
-			const { error } = await clientForSessionHost(hostId).POST(
+			const { error } = await (await clientForSessionHostOnDemand(hostId)).POST(
 				"/api/v1/sessions/{sessionId}/conversation/interrupt",
 				{ params: { path: { sessionId: targetSessionId } } },
 			);
@@ -1322,7 +1322,7 @@ export function useConversationCommands(sessionId: string | undefined, hostId?: 
 	 */
 	const steer = useMutation({
 		mutationFn: async (input: { text: string; attachments?: WireImageContent[]; clientMessageId?: string; recoverOnly?: boolean }) => {
-			const { data, error } = await clientForSessionHost(hostId).POST(
+			const { data, error } = await (await clientForSessionHostOnDemand(hostId)).POST(
 				"/api/v1/sessions/{sessionId}/conversation/steer",
 				{
 					params: { path: { sessionId: sessionId as string } },

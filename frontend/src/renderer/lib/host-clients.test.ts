@@ -1,13 +1,43 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-const remotes = vi.hoisted(() => ({ connect: vi.fn(), disconnect: vi.fn(async () => undefined) }));
+const remotes = vi.hoisted(() => ({ connect: vi.fn(), disconnect: vi.fn(async () => undefined), list: vi.fn(async () => [] as { hostId: string; label: string; url: string }[]) }));
 vi.mock("./bridge", () => ({ aoBridge: { remotes } }));
 
-import { clientForHost, connectHost, connectedHosts, disconnectHost, isQuickTunnelHost, subscribeConnectedHosts } from "./host-clients";
+import { clientForHost, connectHost, connectedHosts, disconnectHost, isQuickTunnelHost, reconnectHost, subscribeConnectedHosts } from "./host-clients";
 
 afterEach(async () => {
 	for (const hostId of connectedHosts()) await disconnectHost(hostId);
 	remotes.connect.mockReset();
+	remotes.list.mockReset().mockResolvedValue([]);
+});
+
+it("reconnects a saved host a failed check evicted from the connected map", async () => {
+	remotes.list.mockResolvedValue([{ hostId: "h_box", label: "Box", url: "http://box:3001" }]);
+	remotes.connect.mockResolvedValue({ hostId: "h_box", label: "Box", url: "http://box:3001", base: "http://127.0.0.1:4000" });
+	await reconnectHost("h_box");
+	expect(remotes.connect).toHaveBeenCalledWith("http://box:3001", "h_box");
+	expect(clientForHost("h_box")).toBeDefined();
+});
+
+it("a client miss starts reconnecting its host in the background", async () => {
+	remotes.list.mockResolvedValue([{ hostId: "h_box", label: "Box", url: "http://box:3001" }]);
+	remotes.connect.mockResolvedValue({ hostId: "h_box", label: "Box", url: "http://box:3001", base: "http://127.0.0.1:4000" });
+	expect(() => clientForHost("h_box")).toThrow(/is not connected/);
+	await vi.waitFor(() => expect(clientForHost("h_box")).toBeDefined());
+});
+
+it("shares one attempt between concurrent reconnects of the same host", async () => {
+	remotes.list.mockResolvedValue([{ hostId: "h_box", label: "Box", url: "http://box:3001" }]);
+	remotes.connect.mockResolvedValue({ hostId: "h_box", label: "Box", url: "http://box:3001", base: "http://127.0.0.1:4000" });
+	await Promise.all([reconnectHost("h_box"), reconnectHost("h_box")]);
+	expect(remotes.list).toHaveBeenCalledTimes(1);
+	expect(remotes.connect).toHaveBeenCalledTimes(1);
+});
+
+it("leaves a host that is no longer saved disconnected", async () => {
+	await reconnectHost("h_gone");
+	expect(remotes.connect).not.toHaveBeenCalled();
+	expect(() => clientForHost("h_gone")).toThrow(/is not connected/);
 });
 
 it("never treats the local sentinel as a remote host", () => {

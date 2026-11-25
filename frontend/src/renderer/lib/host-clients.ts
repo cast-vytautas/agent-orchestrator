@@ -3,6 +3,7 @@ import type { paths } from "../../api/schema";
 import { aoBridge } from "./bridge";
 import { apiClient, reportingFetch } from "./api-client";
 import { markApiError, withApiErrorOwnership } from "./reported-errors";
+import { listRemoteHosts } from "./remote-host-list";
 import { LOCAL_HOST, type HostId } from "./hosts";
 
 type ConnectedHost = { hostId: HostId; label: string; url: string; base: string };
@@ -74,7 +75,7 @@ export async function reconnectHost(hostId: HostId): Promise<void> {
 	if (pending) return pending;
 	const attempt = (async () => {
 		if (hosts.has(hostId)) return;
-		const saved = await aoBridge.remotes.list();
+		const saved = await listRemoteHosts();
 		const entry = saved.find((host) => host.hostId === hostId);
 		if (!entry) return;
 		await connectHost(entry.url, hostId);

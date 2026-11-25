@@ -967,7 +967,8 @@ func (c *commandContext) runHook(ctx context.Context, agent, event string) error
 		conversation = hookConversationFacts(domain.AgentHarness(agent), event, payload)
 	case domain.HarnessOpenCode, domain.HarnessGrok, domain.HarnessKilocode,
 		domain.HarnessOMP, domain.HarnessPi, domain.HarnessTau,
-		domain.HarnessAmp, domain.HarnessPrimeAgent, domain.HarnessMiniMaxCode:
+		domain.HarnessAmp, domain.HarnessPrimeAgent, domain.HarnessMiniMaxCode,
+		domain.HarnessKimchi:
 		conversation = hookSemanticAcceptanceFacts(event, payload)
 		if domain.AgentHarness(agent) == domain.HarnessPi {
 			conversation.TranscriptPath = hookConversationFacts(domain.HarnessPi, event, payload).TranscriptPath

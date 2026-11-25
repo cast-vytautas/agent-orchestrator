@@ -1819,6 +1819,13 @@ func (d reportSemanticDelivery) Submit(ctx context.Context, id domain.SessionID,
 	if errors.Is(err, sessionmanager.ErrPromptSubmissionUnobserved) || (err != nil && strings.Contains(err.Error(), "prompt submission was not observed")) {
 		return fmt.Errorf("%w: %w", reportsvc.ErrUnacknowledgedDelivery, err)
 	}
+	if errors.Is(err, sessionmanager.ErrSemanticAcceptanceUnsupported) {
+		// The active orchestrator's harness cannot durably confirm semantic
+		// acceptance. Surfacing it as the report package's unsupported class lets
+		// the coordinator defer with backoff and skip the project instead of
+		// releasing it as the instantly-due head that poisons every cycle.
+		return fmt.Errorf("%w: %w", reportsvc.ErrReportDeliveryModeUnsupported, err)
+	}
 	return err
 }
 

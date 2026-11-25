@@ -138,6 +138,7 @@ var _ adapters.Adapter = (*Plugin)(nil)
 var _ ports.Agent = (*Plugin)(nil)
 var _ ports.SubmitActivitySignaler = (*Plugin)(nil)
 var _ ports.BlockedActivitySignaler = (*Plugin)(nil)
+var _ ports.SemanticMessageAcceptanceSignaler = (*Plugin)(nil)
 
 // EmitsSubmitActivity signals that Kimchi fires a user-prompt-submit hook
 // under AO's launch, so Activity.State can flip to active after a prompt is
@@ -156,6 +157,19 @@ func (p *Plugin) EmitsSubmitActivity() bool { return true }
 // so a blocked permission dialog is cleared when the approved tool's
 // PostToolUse fires. See ports.BlockedActivitySignaler.
 func (p *Plugin) EmitsBlockedActivity() bool { return true }
+
+// EmitsSemanticMessageAcceptance signals that Kimchi's UserPromptSubmit hook
+// puts the accepted prompt text on stdin, so AO can correlate a durably sent
+// semantic message (a report batch or a session send) with the agent actually
+// accepting that exact text. Kimchi is built on @earendil-works/pi-coding-agent,
+// whose Claude-compatible hook layer maps UserPromptSubmit onto pi's
+// before_agent_start boundary and carries the submitted prompt in the payload's
+// "prompt" field. AO's hook command extracts the wrapped
+// <ao-report-delivery>/<ao-session-delivery> identity from it, and the lifecycle
+// durably records the coordination checkpoint that SendSemantic waits for. A
+// successful pane write alone never satisfies that contract. See
+// ports.SemanticMessageAcceptanceSignaler.
+func (p *Plugin) EmitsSemanticMessageAcceptance() bool { return true }
 
 // permissionConfigEnum lists the permission modes the "permissions" config key
 // accepts. It mirrors the ports.PermissionMode constants so a project's stored

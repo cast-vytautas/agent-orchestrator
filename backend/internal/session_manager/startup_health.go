@@ -60,6 +60,11 @@ func (m *Manager) checkSessionHealth(ctx context.Context, rec domain.SessionReco
 	}
 	alive, err := m.runtime.IsAlive(ctx, handle)
 	if err != nil {
+		// A failed probe is inconclusive, never proof of death: a dead host
+		// reports a clean "not alive" above and settles, while a transport or
+		// adapter error keeps the session untouched in "unavailable" and
+		// lets a later Resume reconcile it without ever duplicating a runtime
+		// that may have survived.
 		return fmt.Errorf("check session %s: %w", rec.ID, err)
 	}
 	if alive {
@@ -67,7 +72,49 @@ func (m *Manager) checkSessionHealth(ctx context.Context, rec domain.SessionReco
 		// intact; its unverified identity will not qualify for native restore.
 		return nil
 	}
-	return m.recordTerminalStoppedAtStartup(ctx, rec)
+	return m.settleTerminalDeadAtStartup(ctx, rec)
+}
+
+// settleTerminalDeadAtStartup marks a terminal whose launch provably ended
+// while AO was down as stopped-and-resumable and remembers it for the boot
+// resume sweep. Only sessions that owned a runtime handle reach this path, so
+// every settled id names an agent that was actually running at the crash.
+func (m *Manager) settleTerminalDeadAtStartup(ctx context.Context, rec domain.SessionRecord) error {
+	if err := m.recordTerminalStoppedAtStartup(ctx, rec); err != nil {
+		return err
+	}
+	m.noteStartupSettledDead(rec.ID)
+	return nil
+}
+
+func (m *Manager) noteStartupSettledDead(id domain.SessionID) {
+	m.startupSettledDeadMu.Lock()
+	m.startupSettledDead = append(m.startupSettledDead, id)
+	m.startupSettledDeadMu.Unlock()
+}
+
+func (m *Manager) drainStartupSettledDead() []domain.SessionID {
+	m.startupSettledDeadMu.Lock()
+	ids := m.startupSettledDead
+	m.startupSettledDead = nil
+	m.startupSettledDeadMu.Unlock()
+	return ids
+}
+
+// ResumeStartupSettledSessions relaunches, in place, the terminal sessions the
+// startup health check settled after proving their runtime dead while AO was
+// down (environment crash or restart). Their worktrees and native
+// conversations survive on disk, so each comes back under its existing id —
+// never as a replacement session with a new number. Sessions the user stopped
+// before the crash were never in the live set and stay parked. Failures leave
+// a session stopped-and-resumable and never abort the sweep.
+func (m *Manager) ResumeStartupSettledSessions(ctx context.Context) error {
+	for _, id := range m.drainStartupSettledDead() {
+		if _, err := m.ResumeAgentWithMode(ctx, id); err != nil {
+			m.logger.Warn("startup resume: session left stopped", "sessionID", id, "error", err)
+		}
+	}
+	return nil
 }
 
 // recordTerminalStoppedAtStartup keeps a terminal whose runtime ended while AO

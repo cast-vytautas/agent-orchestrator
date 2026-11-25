@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 const { post } = vi.hoisted(() => ({ post: vi.fn() }));
-vi.mock("../lib/host-clients", () => ({ clientForSessionHost: () => ({ POST: post }) }));
+vi.mock("../lib/host-clients", () => ({ clientForSessionHost: () => ({ POST: post }), clientForSessionHostOnDemand: async () => ({ POST: post }) }));
 import { ProviderSwitchFailed, useConversationCommands, useProviderSwitchCommand } from "./useConversation";
 import { ChatComposer, AGENT_SWITCH_FAILED } from "../components/chat/ChatComposer";
 import { TooltipProvider } from "../components/ui/tooltip";

@@ -24,11 +24,28 @@ func TestPreflightReviewChatProbesTheReadOnlySandbox(t *testing.T) {
 	}}})
 	workspace := t.TempDir()
 
-	if err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, workspace); err != nil {
+	if err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, workspace, ports.PermissionModeAuto); err != nil {
 		t.Fatalf("PreflightReviewChat: %v", err)
 	}
 	if got.WorkspacePath != workspace {
 		t.Fatalf("probe workspace = %q, want %q", got.WorkspacePath, workspace)
+	}
+}
+
+func TestPreflightReviewChatBypassDoesNotProbeReadOnlySandbox(t *testing.T) {
+	probed := false
+	svc := chatsvc.New(chatsvc.Options{Drivers: fakeRegistry{driver: fakeDriver{
+		probeSandbox: func(ports.ChatSandboxProbeConfig) error {
+			probed = true
+			return ports.ErrChatSandboxUnavailable
+		},
+	}}})
+
+	if err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, t.TempDir(), ports.PermissionModeBypassPermissions); err != nil {
+		t.Fatalf("PreflightReviewChat: %v", err)
+	}
+	if probed {
+		t.Fatal("bypass reviewer probed the unused read-only sandbox")
 	}
 }
 
@@ -38,7 +55,7 @@ func TestPreflightReviewChatSurfacesTheSandboxError(t *testing.T) {
 		probeSandbox: func(ports.ChatSandboxProbeConfig) error { return want },
 	}}})
 
-	err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, t.TempDir())
+	err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, t.TempDir(), ports.PermissionModeAuto)
 	if !errors.Is(err, ports.ErrChatSandboxUnavailable) {
 		t.Fatalf("err = %v, want ErrChatSandboxUnavailable", err)
 	}
@@ -59,7 +76,7 @@ func TestPreflightReviewChatDoesNotProbeWhenAdmissionFails(t *testing.T) {
 		},
 	}}})
 
-	if err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, t.TempDir()); err == nil {
+	if err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, t.TempDir(), ports.PermissionModeAuto); err == nil {
 		t.Fatal("PreflightReviewChat must surface the admission failure")
 	}
 	if probed {
@@ -71,7 +88,7 @@ func TestPreflightReviewChatDoesNotProbeWhenAdmissionFails(t *testing.T) {
 func TestPreflightReviewChatAllowsDriversWithoutASandboxProbe(t *testing.T) {
 	svc := chatsvc.New(chatsvc.Options{Drivers: fakeRegistry{driver: &sequenceDriver{}}})
 
-	if err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, t.TempDir()); err != nil {
+	if err := svc.PreflightReviewChat(context.Background(), domain.HarnessCodex, t.TempDir(), ports.PermissionModeAuto); err != nil {
 		t.Fatalf("PreflightReviewChat: %v", err)
 	}
 }

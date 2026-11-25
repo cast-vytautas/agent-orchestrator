@@ -51,6 +51,18 @@ func isUnacknowledged(err error) bool {
 	return errors.Is(err, ErrUnacknowledgedDelivery) || strings.Contains(err.Error(), "prompt submission was not observed")
 }
 
+// errNoActiveOrchestrator marks a project whose reports must stay pending
+// until an orchestrator exists again. It is matched with errors.Is so one
+// blocked project cannot abort delivery of the projects behind it.
+var errNoActiveOrchestrator = errors.New("no active orchestrator")
+
+// pendingScanLimit bounds how many pending schedule rows one cycle inspects
+// when collecting due projects. A project stuck without an orchestrator stays
+// pending without blocking newer projects, so the scan must reach past its
+// head; only a pathological queue of pendingScanLimit blocked reports ahead of
+// a live one would starve again.
+const pendingScanLimit = 100
+
 // DeliveryStore is the durable report scheduling and routing boundary.
 type DeliveryStore interface {
 	ListSessions(context.Context, domain.ProjectID) ([]domain.SessionRecord, error)
@@ -210,7 +222,7 @@ func (c *Coordinator) RunDue(ctx context.Context) (time.Duration, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for {
-		pending, err := c.store.ListPendingReportSchedule(ctx, 1)
+		pending, err := c.store.ListPendingReportSchedule(ctx, pendingScanLimit)
 		if err != nil {
 			return c.retryDelay, err
 		}
@@ -219,24 +231,26 @@ func (c *Coordinator) RunDue(ctx context.Context) (time.Duration, error) {
 			return -1, nil
 		}
 		now := c.now().UTC()
-		projectID := pending[0].ProjectID
-		if pending[0].AvailableAt.After(now) {
-			delay := pending[0].AvailableAt.Sub(now)
-			early, wait, err := c.nextEarlyFlush(ctx, now)
-			if err != nil {
+		if !pending[0].AvailableAt.After(now) {
+			if err := c.deliverDueProjects(ctx, pending, now); err != nil {
 				return c.retryDelay, err
 			}
-			if early == "" {
-				if wait > 0 && wait < delay {
-					delay = wait
-				}
-				return delay, nil
+			continue
+		}
+		delay := pending[0].AvailableAt.Sub(now)
+		early, wait, err := c.nextEarlyFlush(ctx, now)
+		if err != nil {
+			return c.retryDelay, err
+		}
+		if early == "" {
+			if wait > 0 && wait < delay {
+				delay = wait
 			}
-			projectID = early
+			return delay, nil
 		}
 		// Held until a batch of the project is delivered (see deliverProject).
-		c.earlyHold[projectID] = now.Add(OrchestratorBusyRetry)
-		if err := c.deliverProject(ctx, projectID); err != nil {
+		c.earlyHold[early] = now.Add(OrchestratorBusyRetry)
+		if err := c.deliverProject(ctx, early); err != nil {
 			return c.retryDelay, err
 		}
 	}
@@ -354,13 +368,61 @@ func (c *Coordinator) earlyFlushAt(ctx context.Context, projectID domain.Project
 	return settled.Add(domain.ReportEarlyFlushDebounce), true, nil
 }
 
+// deliverDueProjects delivers the earliest due project that has an active
+// orchestrator. The durable schedule is ordered across projects, and a project
+// whose orchestrator exited keeps its reports pending forever by design, so it
+// must be skipped rather than allowed to starve every project behind it.
+func (c *Coordinator) deliverDueProjects(ctx context.Context, pending []domain.ReportRecord, now time.Time) error {
+	var blocked []domain.ProjectID
+	for _, projectID := range dueProjects(pending, now) {
+		// Held until a batch of the project is delivered (see deliverProject).
+		c.earlyHold[projectID] = now.Add(OrchestratorBusyRetry)
+		err := c.deliverProject(ctx, projectID)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, errNoActiveOrchestrator) {
+			blocked = append(blocked, projectID)
+			continue
+		}
+		return err
+	}
+	if len(blocked) == 0 {
+		return errors.New("due reports delivered no batch")
+	}
+	return fmt.Errorf("projects %s: %w", joinProjectIDs(blocked), errNoActiveOrchestrator)
+}
+
+// dueProjects returns the distinct projects of due pending reports in schedule
+// order.
+func dueProjects(reports []domain.ReportRecord, now time.Time) []domain.ProjectID {
+	seen := map[domain.ProjectID]bool{}
+	out := make([]domain.ProjectID, 0, len(reports))
+	for _, rec := range reports {
+		if rec.AvailableAt.After(now) || seen[rec.ProjectID] {
+			continue
+		}
+		seen[rec.ProjectID] = true
+		out = append(out, rec.ProjectID)
+	}
+	return out
+}
+
+func joinProjectIDs(ids []domain.ProjectID) string {
+	rendered := make([]string, len(ids))
+	for i, id := range ids {
+		rendered[i] = string(id)
+	}
+	return strings.Join(rendered, ", ")
+}
+
 func (c *Coordinator) deliverProject(ctx context.Context, projectID domain.ProjectID) error {
 	target, ok, err := c.activeOrchestrator(ctx, projectID)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("project %s has no active orchestrator", projectID)
+		return fmt.Errorf("project %s: %w", projectID, errNoActiveOrchestrator)
 	}
 	batch, err := c.claim(ctx, projectID)
 	if err != nil || len(batch.Reports) == 0 {
